@@ -1,22 +1,28 @@
-import * as XLSX from 'xlsx';
 import type { Trade } from '../../types/trade';
 import { rMultipleFor, resultFor, tradeSummary } from '../../utils/calculations';
+type Cell = string | number;
+const encoder = new TextEncoder();
+const escapeXml = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const crc32 = (data: Uint8Array) => { let crc = 0xffffffff; for (const byte of data) { crc ^= byte; for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1)); } return (crc ^ 0xffffffff) >>> 0; };
+const numberToColumn = (index: number) => { let column = ''; for (let value = index; value > 0; value = Math.floor((value - 1) / 26)) column = String.fromCharCode(65 + ((value - 1) % 26)) + column; return column; };
+const worksheetXml = (rows: Cell[][]) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rows.map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((cell, cellIndex) => typeof cell === 'number' ? `<c r="${numberToColumn(cellIndex + 1)}${rowIndex + 1}"><v>${cell}</v></c>` : `<c r="${numberToColumn(cellIndex + 1)}${rowIndex + 1}" t="inlineStr"><is><t>${escapeXml(cell)}</t></is></c>`).join('')}</row>`).join('')}</sheetData></worksheet>`;
+const zip = (files: Record<string, string>) => {
+  const entries = Object.entries(files).map(([name, text]) => ({ name, nameBytes: encoder.encode(name), data: encoder.encode(text) })); let offset = 0; const parts: Uint8Array[] = []; const central: Uint8Array[] = [];
+  const header = (size: number) => new Uint8Array(size); const set16 = (bytes: Uint8Array, at: number, value: number) => { bytes[at] = value; bytes[at + 1] = value >>> 8; }; const set32 = (bytes: Uint8Array, at: number, value: number) => { bytes[at] = value; bytes[at + 1] = value >>> 8; bytes[at + 2] = value >>> 16; bytes[at + 3] = value >>> 24; };
+  for (const entry of entries) { const crc = crc32(entry.data); const local = header(30 + entry.nameBytes.length); set32(local, 0, 0x04034b50); set16(local, 4, 20); set16(local, 8, 0); set32(local, 14, crc); set32(local, 18, entry.data.length); set32(local, 22, entry.data.length); set16(local, 26, entry.nameBytes.length); local.set(entry.nameBytes, 30); parts.push(local, entry.data); const directory = header(46 + entry.nameBytes.length); set32(directory, 0, 0x02014b50); set16(directory, 4, 20); set16(directory, 6, 20); set32(directory, 16, crc); set32(directory, 20, entry.data.length); set32(directory, 24, entry.data.length); set16(directory, 28, entry.nameBytes.length); set32(directory, 42, offset); directory.set(entry.nameBytes, 46); central.push(directory); offset += local.length + entry.data.length; }
+  const centralSize = central.reduce((total, bytes) => total + bytes.length, 0); const end = header(22); set32(end, 0, 0x06054b50); set16(end, 8, entries.length); set16(end, 10, entries.length); set32(end, 12, centralSize); set32(end, 16, offset);
+  const chunks = [...parts, ...central, end]; const output = new Uint8Array(chunks.reduce((total, bytes) => total + bytes.length, 0)); let position = 0;
+  for (const chunk of chunks) { output.set(chunk, position); position += chunk.length; }
+  return new Blob([output.buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+};
 export const exportWorkbook = (trades: Trade[]) => {
-  const rows = trades.map((t, i) => ({ 'Trade #': i + 1, Date: t.date ?? '', Time: t.time ?? '', Instrument: t.instrument ?? '', Direction: t.direction ?? '', 'Entry Price': t.entryPrice ?? '', 'Stop Loss': t.stopLoss ?? '', 'Take Profit': t.takeProfit ?? '', 'Exit Price': t.exitPrice ?? '', 'Position Size': t.positionSize ?? '', 'Profit/Loss': t.profitLoss ?? '', 'R-Multiple': rMultipleFor(t) ?? '', Result: resultFor(t.profitLoss), 'Source Image': t.sourceFileName }));
-  const s = tradeSummary(trades);
-  const summary = [
-    ['Metric', 'Value'],
-    ['Total Trades', trades.length],
-    ['Winning Trades', s.wins],
-    ['Losing Trades', s.losses],
-    ['Breakeven Trades', s.breakeven],
-    ['Win Rate', s.winRate ?? ''],
-    ['Total P&L', s.total],
-    ['Average Win', s.avgWin ?? ''],
-    ['Average Loss', s.avgLoss ?? ''],
-    ['Profit Factor', s.profitFactor ?? ''],
-    ['Average R-Multiple', s.avgR ?? ''],
-  ];
-  const book = XLSX.utils.book_new(); const sheet = XLSX.utils.json_to_sheet(rows); sheet['!cols'] = Array(14).fill({ wch: 16 }); XLSX.utils.book_append_sheet(book, sheet, 'Trades'); XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(summary), 'Summary');
-  XLSX.writeFile(book, `trade_journal_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  const tradeRows: Cell[][] = [['Trade #', 'Date', 'Time', 'Instrument', 'Direction', 'Entry Price', 'Stop Loss', 'Take Profit', 'Exit Price', 'Position Size', 'Profit/Loss', 'R-Multiple', 'Result', 'Source Image'], ...trades.map((t, i) => [i + 1, t.date ?? '', t.time ?? '', t.instrument ?? '', t.direction ?? '', t.entryPrice ?? '', t.stopLoss ?? '', t.takeProfit ?? '', t.exitPrice ?? '', t.positionSize ?? '', t.profitLoss ?? '', rMultipleFor(t) ?? '', resultFor(t.profitLoss), t.sourceFileName])];
+  const s = tradeSummary(trades); const summary: Cell[][] = [['Metric', 'Value'], ['Total Trades', trades.length], ['Winning Trades', s.wins], ['Losing Trades', s.losses], ['Breakeven Trades', s.breakeven], ['Win Rate', s.winRate ?? ''], ['Total P&L', s.total], ['Average Win', s.avgWin ?? ''], ['Average Loss', s.avgLoss ?? ''], ['Profit Factor', s.profitFactor ?? ''], ['Average R-Multiple', s.avgR ?? '']];
+  const content = zip({ '[Content_Types].xml': '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>', '_rels/.rels': '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>', 'xl/workbook.xml': '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Trades" sheetId="1" r:id="rId1"/><sheet name="Summary" sheetId="2" r:id="rId2"/></sheets></workbook>', 'xl/_rels/workbook.xml.rels': '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/></Relationships>', 'xl/worksheets/sheet1.xml': worksheetXml(tradeRows), 'xl/worksheets/sheet2.xml': worksheetXml(summary) });
+  const url = URL.createObjectURL(content);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `trade_journal_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  link.click();
+  URL.revokeObjectURL(url);
 };
