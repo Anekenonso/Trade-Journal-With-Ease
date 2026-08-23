@@ -14,8 +14,22 @@ const fields: { key: keyof Trade; label: string; type?: string }[] = [
   {key:'instrument',label:'Instrument'}, {key:'direction',label:'Direction'}, {key:'entryPrice',label:'Entry Price',type:'number'}, {key:'stopLoss',label:'Stop Loss',type:'number'}, {key:'takeProfit',label:'Take Profit',type:'number'}, {key:'exitPrice',label:'Exit Price',type:'number'}, {key:'positionSize',label:'Position Size',type:'number'}, {key:'profitLoss',label:'P&L',type:'number'}, {key:'date',label:'Date',type:'date'}, {key:'time',label:'Time',type:'time'}
 ];
 export default function App() {
-  const [step, setStep] = useState<Step>('home'); const [images, setImages] = useState<SelectedImage[]>([]); const [trades, setTrades] = useState<Trade[]>([]); const [active, setActive] = useState(0); const [notice, setNotice] = useState(''); const [processing, setProcessing] = useState(false); const input = useRef<HTMLInputElement>(null); const imagesRef = useRef<SelectedImage[]>([]);
+  const [step, setStep] = useState<Step>('home'); const [images, setImages] = useState<SelectedImage[]>([]); const [trades, setTrades] = useState<Trade[]>([]); const [active, setActive] = useState(0); const [notice, setNotice] = useState(''); const [processing, setProcessing] = useState(false); const [aiReviewStatus, setAiReviewStatus] = useState<'checking' | 'secure-ai' | 'local-only'>('checking'); const [aiReviewEnabled, setAiReviewEnabled] = useState(true); const input = useRef<HTMLInputElement>(null); const imagesRef = useRef<SelectedImage[]>([]);
   useEffect(() => { imagesRef.current = images; }, [images]);
+  useEffect(() => {
+    let active = true;
+    fetch('/api/health')
+      .then(response => response.json())
+      .then(data => {
+        if (!active) return;
+        setAiReviewStatus(data?.aiReviewEnabled ? 'secure-ai' : 'local-only');
+      })
+      .catch(() => {
+        if (!active) return;
+        setAiReviewStatus('local-only');
+      });
+    return () => { active = false; };
+  }, []);
   useEffect(() => () => imagesRef.current.forEach(i => URL.revokeObjectURL(i.url)), []);
   const selectFiles = (files: FileList | null) => { if (!files) return; const incoming = Array.from(files); const unsupported = incoming.filter(f => !ACCEPTED_IMAGE_TYPES.includes(f.type)); const allowed = incoming.filter(f => ACCEPTED_IMAGE_TYPES.includes(f.type)); const remaining = MAX_IMAGES - images.length;
     if (unsupported.length) setNotice('Some files were skipped because only JPG, PNG, and WEBP images are supported.');
@@ -26,7 +40,7 @@ export default function App() {
   const removeImage = (id: string) => setImages(prev => { const found = prev.find(x=>x.id===id); if (found) URL.revokeObjectURL(found.url); return prev.filter(x => x.id !== id); });
   const clearAll = () => { images.forEach(i=>URL.revokeObjectURL(i.url)); setImages([]); setTrades([]); setNotice(''); setStep('home'); };
   const process = async () => { setStep('processing'); setProcessing(true); setTrades([]); let worker: Awaited<ReturnType<typeof createWorker>> | undefined;
-    try { worker = await createWorker('eng'); const output: Trade[] = []; for (let index=0; index<images.length; index++) { const image = images[index]; setImages(prev=>prev.map((x,i)=>i===index?{...x,status:'processing'}:x)); try { const { data } = await worker.recognize(image.file); output.push(...parseTrades(data.text, image.file.name, image.url)); setImages(prev=>prev.map((x,i)=>i===index?{...x,status:'done'}:x)); } catch { setImages(prev=>prev.map((x,i)=>i===index?{...x,status:'failed',error:'Extraction failed'}:x)); output.push({id:crypto.randomUUID(),sourceFileName:image.file.name,sourceUrl:image.url,confidence:emptyConfidence,needsReview:true}); } } setTrades(output); setActive(0); setStep('results'); }
+    try { worker = await createWorker('eng'); const output: Trade[] = []; for (let index=0; index<images.length; index++) { const image = images[index]; setImages(prev=>prev.map((x,i)=>i===index?{...x,status:'processing'}:x)); try { const { data } = await worker.recognize(image.file); const parsed = await parseTrades(data.text, image.file.name, image.url, { aiReviewEnabled: aiReviewEnabled && aiReviewStatus === 'secure-ai' }); output.push(...parsed); setImages(prev=>prev.map((x,i)=>i===index?{...x,status:'done'}:x)); } catch { setImages(prev=>prev.map((x,i)=>i===index?{...x,status:'failed',error:'Extraction failed'}:x)); output.push({id:crypto.randomUUID(),sourceFileName:image.file.name,sourceUrl:image.url,confidence:emptyConfidence,needsReview:true}); } } setTrades(output); setActive(0); setStep('results'); }
     catch { setNotice('OCR could not start in this browser. You can still add each trade manually in the review screen.'); const fallback = images.map(i=>({id:crypto.randomUUID(),sourceFileName:i.file.name,sourceUrl:i.url,confidence:emptyConfidence,needsReview:true})); setTrades(fallback); setStep('results'); }
     finally { if (worker) await worker.terminate(); setProcessing(false); }
   };
@@ -37,6 +51,24 @@ export default function App() {
     <input ref={input} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={e=>selectFiles(e.target.files)} />
     {notice && <div className="notice"><span>{notice}</span><button onClick={()=>setNotice('')}>×</button></div>}
     <main id="top">
+      <div className="status-strip" style={{display:'flex', justifyContent:'center', alignItems:'center', gap:'12px', margin:'12px 0 0', flexWrap:'wrap'}}>
+        <span className="badge" style={{background: aiReviewStatus === 'secure-ai' ? '#dff9eb' : '#f6f3d8', color: '#1a1f22', border:'1px solid rgba(0,0,0,0.08)'}}>
+          {aiReviewStatus === 'checking' ? 'Checking AI review status…' : aiReviewStatus === 'secure-ai' ? 'AI review: secure backend enabled' : 'Privacy mode: local-only'}
+        </span>
+        <button
+          className="outline"
+          onClick={() => setAiReviewEnabled(value => !value)}
+          style={{padding:'8px 12px', fontSize:'0.8rem'}}
+          type="button"
+        >
+          {aiReviewEnabled ? 'AI review: on' : 'AI review: off'}
+        </button>
+      </div>
+      {(!aiReviewEnabled || aiReviewStatus !== 'secure-ai') && (
+        <div className="notice" style={{marginTop:'12px'}}>
+          <span>{!aiReviewEnabled ? 'AI review is disabled. The app is running in local extraction mode only.' : 'AI review is unavailable. Falling back to local extraction only.'}</span>
+        </div>
+      )}
       {step==='home' && <section className="hero"><div className="eyebrow">PRIVATE • BROWSER-ONLY • NO SIGN-UP</div><h1>Turn your trade screenshots into an Excel journal</h1><p>Upload up to 15 screenshots from MT4, MT5 or TradingView. We’ll extract the trade data and create an organized Excel file for you.</p><div className="actions"><button className="primary" onClick={()=>input.current?.click()}>Upload Trade Screenshots <b>→</b></button><span>JPG, PNG, WEBP · Up to 15 images</span></div><div className="privacy-card">🔒 <div><strong>Your data stays on your device.</strong><br/>We don’t store your screenshots or trading data.</div></div><div className="steps"><div><b>1</b><strong>Upload screenshots</strong><span>Select your MT4, MT5 or TradingView images.</span></div><div><b>2</b><strong>Review extracted data</strong><span>Correct anything that needs attention.</span></div><div><b>3</b><strong>Download your journal</strong><span>Get a clean Excel workbook instantly.</span></div></div></section>}
       {step==='upload' && <section className="panel"><div className="section-head"><div><p className="eyebrow">STEP 1 OF 3</p><h2>Selected images</h2><p>{images.length} of {MAX_IMAGES} images selected</p></div><button className="text-btn danger" onClick={clearAll}>Clear all</button></div><div className="preview-grid">{images.map(img=><article className="preview" key={img.id}><img src={img.url} alt="Selected trading screenshot"/><div><span title={img.file.name}>{img.file.name}</span><button aria-label={`Remove ${img.file.name}`} onClick={()=>removeImage(img.id)}>×</button></div></article>)}<button className="add-card" onClick={()=>input.current?.click()}>＋<span>Add images</span></button></div><div className="toolbar"><button className="outline" onClick={()=>input.current?.click()}>Add images</button><button className="primary" disabled={!images.length} onClick={process}>Process images →</button></div></section>}
       {step==='processing' && <section className="panel processing"><div className="spinner"/><p className="eyebrow">LOCAL PROCESSING</p><h2>Processing your screenshots…</h2><p>{images.filter(i=>i.status==='done'||i.status==='failed').length} / {images.length} completed</p><div className="progress"><i style={{width:`${(images.filter(i=>i.status==='done'||i.status==='failed').length / Math.max(images.length,1))*100}%`}}/></div><div className="status-list">{images.map(i=><div key={i.id}><span>{i.status==='done'?'✓':i.status==='failed'?'⚠':i.status==='processing'?'◌':'○'}</span><b>{i.file.name}</b><em>{i.status==='done'?'Extracted':i.status==='failed'?'Extraction failed':i.status==='processing'?'Processing':'Pending'}</em></div>)}</div><small>Please don’t close or refresh this page while processing.</small></section>}

@@ -7,6 +7,38 @@ describe('trade validation', () => {
   it('accepts BUY and SELL only', () => { expect(validDirection('BUY')).toBe('BUY'); expect(validDirection('hold')).toBeUndefined(); });
 });
 
+describe('ai review gating', () => {
+  it('flags low-confidence trade blocks for model-assisted review', async () => {
+    const { shouldUseAiReview } = await import('../services/extraction/llm');
+
+    expect(shouldUseAiReview({
+      id: '1',
+      sourceFileName: 'x.png',
+      sourceUrl: 'blob:x',
+      instrument: undefined,
+      direction: 'BUY',
+      entryPrice: 1.1,
+      confidence: { instrument: 0.2, direction: 0.9, entryPrice: 0.8, stopLoss: 0, takeProfit: 0, exitPrice: 0, profitLoss: 0 },
+      needsReview: true,
+    })).toBe(true);
+
+    expect(shouldUseAiReview({
+      id: '2',
+      sourceFileName: 'x.png',
+      sourceUrl: 'blob:x',
+      instrument: 'EURUSD',
+      direction: 'BUY',
+      entryPrice: 1.1,
+      stopLoss: 1.09,
+      takeProfit: 1.12,
+      exitPrice: 1.11,
+      profitLoss: 10,
+      confidence: { instrument: 0.95, direction: 0.9, entryPrice: 0.8, stopLoss: 0.8, takeProfit: 0.8, exitPrice: 0.8, profitLoss: 0.8 },
+      needsReview: false,
+    })).toBe(false);
+  });
+});
+
 describe('ocr extraction robustness', () => {
   it('extracts values from a trade block with OCR spacing and arrow noise', () => {
     const text = [

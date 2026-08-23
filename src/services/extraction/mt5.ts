@@ -1,5 +1,6 @@
 import type { Confidence, Trade } from '../../types/trade';
 import { normalizeInstrument, parseNumber, validDirection, needsReview } from '../../utils/validation';
+import { enhanceTradeWithAi, shouldUseAiReview } from './llm';
 import { parseTrade } from './parser';
 
 const confidence: Confidence = { instrument: .95, direction: .95, entryPrice: .9, stopLoss: .9, takeProfit: .9, exitPrice: .9, profitLoss: .9 };
@@ -18,9 +19,22 @@ export const parseMt5History = (text: string, sourceFileName: string, sourceUrl:
   });
 };
 
-export const parseTrades = (text: string, sourceFileName: string, sourceUrl: string) => {
+export const parseTrades = async (
+  text: string,
+  sourceFileName: string,
+  sourceUrl: string,
+  options: { aiReviewEnabled?: boolean } = {},
+) => {
+  const aiReviewEnabled = options.aiReviewEnabled ?? true;
   const history = parseMt5History(text, sourceFileName, sourceUrl);
-  if (history.length) return history;
+  if (history.length) {
+    const reviewed = await Promise.all(history.map(async (trade) => {
+      if (!aiReviewEnabled || !shouldUseAiReview(trade)) return trade;
+      return enhanceTradeWithAi(trade, text);
+    }));
+    return reviewed;
+  }
+
   const trade = parseTrade(text, sourceFileName, sourceUrl);
   const pending = text.toUpperCase().match(/\b(BUY|SELL)\s+(LIMIT|STOP)\b/);
   if (pending) {
@@ -28,5 +42,7 @@ export const parseTrades = (text: string, sourceFileName: string, sourceUrl: str
     trade.orderType = `${pending[1]} ${pending[2]}` as Trade['orderType'];
     trade.needsReview = true;
   }
-  return [trade];
+
+  if (!aiReviewEnabled || !shouldUseAiReview(trade)) return [trade];
+  return [await enhanceTradeWithAi(trade, text)];
 };
