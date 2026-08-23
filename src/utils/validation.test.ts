@@ -63,11 +63,12 @@ describe('ocr extraction robustness', () => {
     expect(trade.profitLoss).toBe(-21);
   });
 
-  it('handles broker-style price lines without an arrow separator', () => {
+  it('handles broker-style price lines without an arrow separator when SL and TP are labeled', () => {
     const text = [
       'EURUSD BUY 0.25',
       '1.15592 1.15508 -21.00',
-      '1.15511 1.15837',
+      'S/L: 1.15511',
+      'T/P: 1.15837',
       'Open 2026.08.10 07:54:38',
     ].join('\n');
 

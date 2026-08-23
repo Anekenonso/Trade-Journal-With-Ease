@@ -44,34 +44,51 @@ const scoreTradeBlock = (text: string) => {
 };
 
 const parseTradeBlock = (text: string) => {
-  const symbolMatch = text.match(/\b([A-Z]{3,6}(?:\s*[/\\-]?\s*[A-Z]{3,6})?)\b(?=(?:\s*[,/\\-]?\s*|\s+)(?:BUY|SELL)\b)/i);
   const directionMatch = text.match(/\b(BUY|SELL)\b/i);
-  const priceLine = text.match(/([0-9]+(?:[.,]\d{3,}))\s*(?:>|->|→|~)\s*([0-9]+(?:[.,]\d{3,}))\s*([+-]?\s*[0-9]+(?:[.,]\d+)?)/i)
-    ?? text.match(/([0-9]+(?:[.,]\d{3,}))\s+([0-9]+(?:[.,]\d{3,}))\s+([+-]?\s*[0-9]+(?:[.,]\d+)?)/i)
-    ?? text.match(/([0-9]+(?:[.,]\d{2,}))\s+([0-9]+(?:[.,]\d{2,}))\s+([+-]?\s*[0-9]+(?:[.,]\d+)?)/i);
+  const symbolMatch = text.match(/\b([A-Z]{3,6}(?:\s*[/\\-]?\s*[A-Z]{3,6})?)(?=\s*(?:,|\s+)?\s*(?:BUY|SELL)\b)/i) ??
+    (directionMatch && directionMatch.index !== undefined ? text.slice(0, directionMatch.index).match(/([A-Z]{3,6}(?:\s*[/\\-]?\s*[A-Z]{3,6})?)$/i) : undefined);
   const stopMatch = text.match(/S\s*[/\\-]?\s*L\s*[:=]?\s*([0-9][0-9.,]+)/i);
   const takeMatch = text.match(/T\s*[/\\-]?\s*P\s*[:=]?\s*([0-9][0-9.,]+)/i);
 
-  const fallbackPriceCandidates = (() => {
-    const rawText = priceLine ? text.slice((priceLine.index ?? 0) + priceLine[0].length) : text;
-    const prices = [...rawText.matchAll(/\b\d+(?:[.,]\d{4,})\b/g)]
-      .map(match => parseNumber(match[0]))
-      .filter((value): value is number => value !== undefined)
-      .filter(value => value >= 0.0001 && value <= 9999);
-    return prices;
-  })();
+  const numberTokens = [...text.matchAll(/[+-]?\d+(?:[.,]\d+)?/g)].map(match => ({
+    value: parseNumber(match[0]),
+    index: match.index ?? 0,
+    text: match[0],
+  })).filter(entry => entry.value !== undefined);
 
-  const stopLoss = stopMatch ? parseNumber(stopMatch[1]) : fallbackPriceCandidates[0];
-  const takeProfit = takeMatch ? parseNumber(takeMatch[1]) : fallbackPriceCandidates[1];
+  const selectBestPriceSequence = () => {
+    let best: { first: number; second: number; third: number; score: number } | undefined;
+
+    for (let i = 0; i + 2 < numberTokens.length; i++) {
+      const first = numberTokens[i].value as number;
+      const second = numberTokens[i + 1].value as number;
+      const third = numberTokens[i + 2].value as number;
+
+      if (first <= 0.5 || second <= 0.5) continue;
+      if (first > 10000 || second > 10000 || third > 10000) continue;
+
+      const hasArrow = />|->|→|~/i.test(text.slice(numberTokens[i].index, numberTokens[i + 2].index + numberTokens[i + 2].text.length));
+      const hasPnlSignal = /[+-]/.test(numberTokens[i + 2].text) || /P&L|P\/L|profit|loss/i.test(text);
+      const score = (first >= 0.8 && second >= 0.8 ? 5 : 0) + (hasArrow ? 3 : 0) + (hasPnlSignal ? 3 : 0) + (Math.abs(third) <= 500 ? 2 : 0);
+
+      if (!best || score > best.score) {
+        best = { first, second, third, score };
+      }
+    }
+
+    return best;
+  };
+
+  const priceSequence = selectBestPriceSequence();
 
   return {
     instrument: symbolMatch ? normalizeInstrument(symbolMatch[1]) : undefined,
     direction: directionMatch ? validDirection(directionMatch[1]) : undefined,
-    entryPrice: priceLine ? parseNumber(priceLine[1]) : undefined,
-    exitPrice: priceLine ? parseNumber(priceLine[2]) : undefined,
-    stopLoss,
-    takeProfit,
-    profitLoss: priceLine ? parseNumber(priceLine[3]) : undefined,
+    entryPrice: priceSequence ? priceSequence.first : undefined,
+    exitPrice: priceSequence ? priceSequence.second : undefined,
+    stopLoss: stopMatch ? parseNumber(stopMatch[1]) : undefined,
+    takeProfit: takeMatch ? parseNumber(takeMatch[1]) : undefined,
+    profitLoss: priceSequence ? priceSequence.third : undefined,
     positionSize: parseNumber(matchFirst(text, [/\bvolume\s*[:=]?\s*([0-9][0-9.,]+)/i, /\blot(?:\s*size)?\s*[:=]?\s*([0-9][0-9.,]+)/i])),
   };
 };
