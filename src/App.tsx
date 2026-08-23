@@ -33,7 +33,7 @@ export default function App() {
   const updateTrade = (key: keyof Trade, value: string) => setTrades(prev => prev.map((t,i) => i !== active ? t : {...t, [key]: ['entryPrice','stopLoss','takeProfit','exitPrice','positionSize','profitLoss'].includes(String(key)) ? (value === '' ? undefined : Number(value)) : value || undefined, needsReview: !t.instrument || !t.direction || t.entryPrice === undefined || t.profitLoss === undefined }));
   const deleteTrade = () => { setTrades(prev=>prev.filter((_,i)=>i!==active)); setActive(a=>Math.max(0,a-1)); setStep('results'); };
   const summary = tradeSummary(trades); const current = trades[active];
-  return <div className="app"><header><a className="brand" href="#top" onClick={()=>setStep('home')}><span>▦</span>{APP_NAME}</a><nav><a href="#how">How it works</a><a href="#privacy">Privacy</a><a href="#about">About</a></nav><button className="outline small" onClick={()=>input.current?.click()}>Upload screenshots</button></header>
+  return <div className="app"><header><a className="brand" href="#top" onClick={()=>setStep('home')}><span>▦</span>{APP_NAME}</a><nav><a href="#how">How it works</a><a href="#privacy">Privacy</a><a href="#about">About</a></nav></header>
     <input ref={input} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={e=>selectFiles(e.target.files)} />
     {notice && <div className="notice"><span>{notice}</span><button onClick={()=>setNotice('')}>×</button></div>}
     <main id="top">
