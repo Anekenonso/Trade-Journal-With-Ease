@@ -4,7 +4,7 @@ import { enhanceTradeWithAi, shouldUseAiReview } from './llm';
 import { parseTrade } from './parser';
 
 const confidence: Confidence = { instrument: .95, direction: .95, entryPrice: .9, stopLoss: .9, takeProfit: .9, exitPrice: .9, profitLoss: .9 };
-const decimal = '(\\d{1,3}(?:[.,]\\d{3,8}))';
+const decimal = '(?:\\d{1,3}(?:[.,]\\d{3,8}))';
 const labelledValue = (text: string, label: string) => parseNumber(text.match(new RegExp(`${label}\\s*[:=]?\\s*([+-]?${decimal})`, 'i'))?.[1]);
 const makeTrade = (sourceFileName: string, sourceUrl: string, values: Partial<Trade>): Trade => ({ id: crypto.randomUUID(), sourceFileName, sourceUrl, confidence: { ...confidence, instrument: values.instrument ? .95 : 0, direction: values.direction ? .95 : 0, entryPrice: values.entryPrice === undefined ? 0 : .9, stopLoss: values.stopLoss === undefined ? 0 : .9, takeProfit: values.takeProfit === undefined ? 0 : .9, exitPrice: values.exitPrice === undefined ? 0 : .9, profitLoss: values.profitLoss === undefined ? 0 : .9 }, ...values, needsReview: values.orderType !== 'MARKET' || needsReview(values) });
 
