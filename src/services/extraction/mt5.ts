@@ -23,14 +23,14 @@ export const parseTrades = async (
   text: string,
   sourceFileName: string,
   sourceUrl: string,
-  options: { aiReviewEnabled?: boolean } = {},
+  options: { aiReviewEnabled?: boolean; imageDataUrl?: string } = {},
 ) => {
   const aiReviewEnabled = options.aiReviewEnabled ?? true;
   const history = parseMt5History(text, sourceFileName, sourceUrl);
   if (history.length) {
     const reviewed = await Promise.all(history.map(async (trade) => {
       if (!aiReviewEnabled || !shouldUseAiReview(trade)) return trade;
-      return enhanceTradeWithAi(trade, text);
+      return enhanceTradeWithAi(trade, text, options.imageDataUrl);
     }));
     return reviewed;
   }
@@ -44,5 +44,5 @@ export const parseTrades = async (
   }
 
   if (!aiReviewEnabled || !shouldUseAiReview(trade)) return [trade];
-  return [await enhanceTradeWithAi(trade, text)];
+  return [await enhanceTradeWithAi(trade, text, options.imageDataUrl)];
 };

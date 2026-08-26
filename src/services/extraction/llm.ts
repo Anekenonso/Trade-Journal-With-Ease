@@ -29,9 +29,9 @@ export const shouldUseAiReview = (trade: Partial<Trade>) => {
   return trade.needsReview || filled < 5 || averageConfidence < 0.7;
 };
 
-export const enhanceTradeWithAi = async (trade: Trade, rawOcrText: string): Promise<Trade> => {
+export const enhanceTradeWithAi = async (trade: Trade, rawOcrText: string, imageDataUrl?: string): Promise<Trade> => {
   const candidateText = rawOcrText.trim();
-  if (!candidateText || !shouldUseAiReview(trade)) return trade;
+  if ((!candidateText && !imageDataUrl) || !shouldUseAiReview(trade)) return trade;
 
   try {
     const response = await fetch('/api/ai-review', {
@@ -39,7 +39,7 @@ export const enhanceTradeWithAi = async (trade: Trade, rawOcrText: string): Prom
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ text: candidateText }),
+      body: JSON.stringify({ text: candidateText, image: imageDataUrl }),
     });
 
     if (!response.ok) return trade;

@@ -78,4 +78,16 @@ describe('enhanceTradeWithAi', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result).toBe(highConfidence);
   });
+
+  it('sends the downscaled screenshot to the backend when one is provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await enhanceTradeWithAi(lowConfidenceTrade(), 'some ocr text', 'data:image/jpeg;base64,abc123');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.image).toBe('data:image/jpeg;base64,abc123');
+    expect(body.text).toBe('some ocr text');
+  });
 });

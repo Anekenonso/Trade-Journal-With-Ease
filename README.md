@@ -1,4 +1,26 @@
-# Trade Screenshot Journal v1.2
+# Trade Screenshot Journal v1.3
+
+## V1.3 release notes
+
+This release upgrades AI review to a **vision model** and switches the backend to
+an Anthropic-compatible Messages API (AgentRouter by default), fixing weak
+extraction on real MT4/MT5 screenshots.
+
+### Highlights
+
+- **AI review now reads the screenshot itself**, not just the OCR text. The
+  downscaled image is sent to a vision-capable model (`claude-opus-4-8`), which
+  extracts the trade directly and overrides noisy OCR — a large accuracy win on
+  real MetaTrader layouts.
+- **Backend moved to the Anthropic-compatible Messages API**, defaulting to
+  AgentRouter (`ANTHROPIC_BASE_URL=https://agentrouter.org`). Official Anthropic
+  still works by pointing `ANTHROPIC_BASE_URL` at `api.anthropic.com`. Configure
+  with `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_MODEL`.
+- **Privacy promise unchanged**: AI review is still opt-in and off by default,
+  and the provider token stays server-side. The privacy copy now states plainly
+  that the screenshot leaves the device when AI review is turned on.
+- **Fixed a Windows + Vite 8 test crash** by switching Vitest to the `forks`
+  pool, and added a test covering the screenshot-upload path.
 
 ## V1.2 release notes
 
@@ -9,7 +31,7 @@ extraction bug, and adds automated test coverage.
 
 - **Secure AI review now runs in production**, served by Vercel serverless
   functions (`/api/health`, `/api/ai-review`) instead of only the local Express
-  server. Set `OPENAI_API_KEY` in your Vercel project to enable it.
+  server. Set `ANTHROPIC_AUTH_TOKEN` in your Vercel project to enable it.
 - **AI review is opt-in (off by default) and rate-limited**, with a payload-size
   cap, keeping the privacy-first promise intact.
 - **Fixed an MT5 history bug** where the exit price was extracted as the entry
@@ -33,7 +55,7 @@ This release improves the product’s core trade-extraction workflow and makes t
 
 ### Business value
 
-The app now converts screenshots into cleaner, more reviewable trade data faster, while preserving the user’s privacy-first workflow. If the user enables AI review, the enhancement runs through a protected backend so the OpenAI key stays off the client.
+The app now converts screenshots into cleaner, more reviewable trade data faster, while preserving the user’s privacy-first workflow. If the user enables AI review, the enhancement runs through a protected backend so the provider token stays off the client.
 
 ## Run locally
 
@@ -51,11 +73,11 @@ npm install
 npm run dev:all
 ```
 
-This starts the Vite frontend and the Express AI review server together. The backend reads `OPENAI_API_KEY` from `.env`, while the browser never sees it.
+This starts the Vite frontend and the Express AI review server together. The backend reads `ANTHROPIC_AUTH_TOKEN` (and optional `ANTHROPIC_BASE_URL` / `ANTHROPIC_MODEL`) from `.env`, while the browser never sees it.
 
 ## Privacy
 
-By default, OCR uses Tesseract.js in the browser and the Excel workbook is generated locally. Screenshots and trade data remain on-device unless the user explicitly enables the optional secure AI review backend.
+By default, OCR uses Tesseract.js in the browser and the Excel workbook is generated locally — screenshots and trade data never leave the device. AI review is opt-in and off by default; when you turn it on, the screenshot (plus the OCR text as a hint) is sent to the secure backend and forwarded to a vision-capable model (Claude via AgentRouter by default) for analysis. Turn it off to stay fully local.
 
 ## Deploy
 
@@ -63,15 +85,21 @@ Deploy to Vercel from GitHub with zero config — Vercel detects Vite, builds th
 static frontend, and serves the functions in `api/` (`/api/health`,
 `/api/ai-review`) as serverless endpoints on the same origin.
 
-- **Core V1 needs no environment variables.** With no `OPENAI_API_KEY` set, the
+- **Core V1 needs no environment variables.** With no `ANTHROPIC_AUTH_TOKEN` set, the
   app runs entirely local-only (screenshots and trade data never leave the
   browser).
-- **To enable secure AI review in production**, add `OPENAI_API_KEY` to your
-  Vercel project's Environment Variables. The key stays server-side inside the
-  serverless function and is never shipped to the client.
+- **To enable secure AI review in production**, add `ANTHROPIC_AUTH_TOKEN` to your
+  Vercel project's Environment Variables (plus `ANTHROPIC_BASE_URL=https://agentrouter.org`
+  to route through AgentRouter). The token stays server-side inside the serverless
+  function and is never shipped to the client.
 - **AI review is opt-in.** Even when the backend is available, it stays off until
-  the user turns it on with the in-app toggle, and only OCR *text* (never the
-  screenshot) is sent for analysis.
+  the user turns it on with the in-app toggle. When enabled, the screenshot (plus
+  the OCR text as a hint) is sent to a vision model for analysis; with it off,
+  nothing leaves the browser.
+- **The model is configurable** via the `ANTHROPIC_MODEL` env var (e.g.
+  `claude-opus-4-8`; a smaller model such as `claude-3-5-haiku` lowers cost). The
+  backend calls an Anthropic-compatible Messages API, so AgentRouter or official
+  Anthropic both work — switch with `ANTHROPIC_BASE_URL`.
 - The `/api/ai-review` endpoint applies best-effort in-memory rate limiting and a
   payload-size cap to protect the key from abuse. For strong global limits, back
   it with Vercel KV / Upstash.
